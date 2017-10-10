@@ -6,8 +6,8 @@
       WiFi Settings         
 */
 
-const char ssid[]     =   "wiFi_Home";
-const char pass[]     =   "02032010giulio";
+const char ssid[]     =   "yourWIFInetwork";
+const char pass[]     =   "yourWIFIpassword";
 
 IPAddress       ip(192,168,0,36);  
 IPAddress       gateway(192,168,0,1);
