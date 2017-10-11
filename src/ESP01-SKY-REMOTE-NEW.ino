@@ -1,13 +1,28 @@
+/*
+  ===========================================
+       Copyright (c) 2017 Luca Nervetti
+              github.com/lunix80
+  ===========================================
+
+Connections: 
+
+ESP01       IR Led
+Vcc     ->    (+)
+Gpio0   ->    (-)
+  
+*/
+
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-
 /*****************************************************************
-      WiFi Settings         
+      WiFi Settings:
+        IP address for ESP01 device
+        Gateway and Subnet        
 */
 
-const char ssid[]     =   "yourWIFInetwork";
-const char pass[]     =   "yourWIFIpassword";
+#include "credentials.h"
+
 
 IPAddress       ip(192,168,0,36);  
 IPAddress       gateway(192,168,0,1);
@@ -15,14 +30,20 @@ IPAddress       subnet(255,255,255,0);
 
 
 /*****************************************************************
-      MqTT Settings        
+      MqTT Settings:
+        Broker IP and Port 
+        Client ID
+        Topic for public status
+        Topic to subscribe
+     
 */
-const char mqtt[]     =   "192.168.0.165";
-const int  mqtt_port  =   1883;
+const char mqtt[]       =   "192.168.0.165";
+const int  mqtt_port    =   1883;
+
 
 const char client_id[]  =  "ESP01-192-168-0-36";
-const char topic[]    =   "home/sky";
-const char topicsub[] =   "home/sky/command";
+const char topic[]      =  "home/sky";
+const char topicsub[]   =  "home/sky/command";
 
 
 
@@ -30,66 +51,32 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 
-#define XMP_UNIT            136 /* us */
-#define XMP_LEADER          210 /* us */
-#define XMP_NIBBLE_PREFIX   760 /* us */
-#define XMP_HALFFRAME_SPACE 13800 /* us */
-#define XMP_TRAILER_SPACE   80400 /* us should be 80ms but not all dureation supliers can go that high */
+/*****************************************************************
+      XMP1 Protocol Settings        
+      http://www.hifi-remote.com/wiki/index.php?title=XMP
+      https://github.com/torvalds/linux/blob/master/drivers/media/rc/ir-xmp-decoder.c
+*/
 
-#define IRpin   0  
-#define KHZ     33
-
-#define OEM      0x41;
-#define SUBADDR  0x20;
-#define DEVICE   0x31;
-// #define OBC1    
-// #define OBC2     0;
+#define XMP_UNIT            136     /* us */
+#define XMP_LEADER          210     /* us */
+#define XMP_NIBBLE_PREFIX   760     /* us */
+#define XMP_HALFFRAME_SPACE 13800   /* us */
+#define XMP_TRAILER_SPACE   80400   /* us should be 80ms but not all dureation supliers can go that high */
 
 
-uint8_t halfPeriodicTime = 500 / KHZ - 1; // -1 to compensate digitalWrite command time
+#define IRpin   0           // gpio0 --> (-) IR Led
+#define KHZ     36          // 36 Khz protocol
 
-uint8_t codes[36] = { // SKY REMOTE COMMAND CODES
-0x00,
-0x01,
-0x02,
-0x03,
-0x04,
-0x05,
-0x06,
-0x07,
-0x08,
-0x09,
-0x0D, // P+       a
-0x0E, // P-       b
-0x0F, // POWER    c
-0x55, // INFO     d
-0x21, // UP       e
-0x22, // DOWN     f
-0x23, // LEFT     g 
-0x24, // RIGHT    h
-0x25, // OK       i
-0x26, // ESC      j
-0x30, // REW      k
-0x31, // PAUSE    l
-0x32, // FWD      m
-0x33, // PLAY     n
-0x34, // REC      o
-0x35, // STOP     p
-0x40, // RED      q
-0x41, // GREEN    r
-0x42, // YELLOW   s
-0x43, // BLUE     t
-0x56, // P-txt    u
+/*****************************************************************
+      Sky Remote Settings       
+*/
+#define OEM      0x44
+#define SUBADDR  0x20
+#define DEVICE   0x31
+// #define OBC1        
+// #define OBC2     0
 
-0x20, // MENU     v   
-0x50, // GUIDA    w
-0x52, // PRIMA    x
-0x53, // SKY      y
-0x57  // MY       z
-};
-
-char ref[] = "0123456789abcdefghijklmnopqrstuvwxyz";
- 
+const uint8_t halfPeriodicTime = 13; // 500 / KHZ - 1; // -1 to compensate digitalWrite command time
 
 void setup() {
    pinMode(IRpin, OUTPUT);
@@ -97,13 +84,13 @@ void setup() {
 
    WiFi_Connect();
    client.setServer(mqtt, mqtt_port);
-   client.setCallback(mqtt_in);
-
-   
+   client.setCallback(mqtt_callback);   
 }
 
 void loop() {
-  if (!client.connected()) {  MqTT_Connect(); }
+  if (!client.connected()) {  
+    MqTT_Connect(); 
+  }
   client.loop();
 }
 
@@ -118,54 +105,45 @@ void WiFi_Connect(){
       ESP.restart();  
     }
 }
+
+
 void MqTT_Connect(){
   while (!client.connected()) {
+    
        if (WiFi.status() != WL_CONNECTED){
            WiFi_Connect();
-        }
-        if (client.connect(client_id)) {  
+       }
+       
+       if (client.connect(client_id)) {  
           client.publish(topic, "ready");
           client.subscribe(topicsub);
         } else {
-          // Wait 5 seconds before retrying
-          delay(5000);
+          delay(5000);    // Wait 5 seconds before retrying
       }
     }
 }
 
 
-
-
-void mqtt_in(char* topic, byte* payload, unsigned int length) {
-
- /*
-payload[length] = '\0';
-String s = String((char*)payload);
-int i= s.toInt();
+/*****************************************************************
+      
 */
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
-  int k = findPos(ref, sizeof(ref), (char)payload[0]);
-  if (k >= 0){
-    sendKey(codes[k]);
-   //  client.publish(topic, String(k));
-  }
+  payload[length] = '\0';
+  int i = strtol((char*)payload, 0 , 16); // Transform Hex String to Int
+  sendCommand(i);
   
 }
 
+/*****************************************************************
+      
+*/
+void sendCommand(unsigned int COMMAND){
 
-void sendKey(unsigned int COMMAND){
-
-
-                        //  S  C  S      O  O  D  D
-  // unsigned int frame1[8] = { 2, 3, 0, 15, 4, 4, 3, 1 };
-                           //  S  C  T   S  F  F  F  F
-  // unsigned int frame2[8] = { 2, 0, 0,  0, 0, 0, 0, 0};
-
-
-
+  
   unsigned int F1[8] = { 
           SUBADDR >> 4,         // SUBADDRESS
-          0,                    // CHECKSUM
+          0,                    // CHECKSUM 
           SUBADDR & 0x0F,       // SUBADDRESS
           15,                   // TOGGLE
           OEM >> 4,             // OEM
@@ -186,59 +164,99 @@ void sendKey(unsigned int COMMAND){
               
   };
 
-  // CHECKSUM
-  F1[1] = checksum(F1);
   
-  sendRaw(F1, sizeof(F1) / sizeof(F1[0]), 36);  
+  F1[1] = checksum(F1);     // CHECKSUM
+  
+  sendRaw(F1, sizeof(F1) / sizeof(F1[0])); 
   
   mark(XMP_LEADER);
   space(XMP_HALFFRAME_SPACE);
 
-  F2[1] = checksum(F2);
+  F2[1] = checksum(F2);     // CHECKSUM
   
-  sendRaw(frame2, sizeof(frame2) / sizeof(frame2[0]), 36);
+  sendRaw(F2, sizeof(F2) / sizeof(F2[0]));
+   
+  mark(XMP_LEADER);
+  space(XMP_TRAILER_SPACE);
+
+  sendRaw(F1, sizeof(F1) / sizeof(F1[0])); 
 
   mark(XMP_LEADER);
   space(XMP_HALFFRAME_SPACE);
-
-  sendRaw(frame1, sizeof(frame1) / sizeof(frame1[0]), 36); 
-
-  mark(MARK);
-  space(12900);
   
-  F2[2] = 8;
-  F2[1] = checksum(F2);
+  F2[2] = 8;                // SET TOGGLE
+  F2[1] = checksum(F2);     // CHECKSUM
 
-  sendRaw(frame2, sizeof(frame2) / sizeof(frame2[0]), 36); 
+  sendRaw(F2, sizeof(F2) / sizeof(F2[0]));
 
-  mark(MARK);
+  mark(XMP_LEADER);
   space(0);
 
 
 }
 
+/*****************************************************************
+      
+*/
 
-uint8_t checksum(unsigned int F){
+uint8_t checksum(unsigned int F[]){
   
-      return ~(0x0F + F[0] + F[2] + F[3] + F[4] + F[5] + F[6] + F[7]) & 0x0F;
+  return ~(0x0F + F[0] + F[2] + F[3] + F[4] + F[5] + F[6] + F[7]) & 0x0F;
 
 }
 
-int findPos(const char* f, size_t f_size, char s){
 
-  int ret = -1;
-  int i = 0;
-  bool found = false;
+/*****************************************************************
   
-  while (i < f_size && !found){
+*/
 
-    found = (f[i++] == s);
+void sendRaw(unsigned int buf[], unsigned int len){ 
+  
+  for (int i = 0;  i < len;  i++) {
+  
+    mark(XMP_LEADER);
+    space(XMP_NIBBLE_PREFIX + (buf[i] * XMP_UNIT));  
     
   }
-
-  if (found){
-    ret = i - 1;
-  }
-
-  return ret;
+  
 }
+
+
+
+/*****************************************************************
+    
+*/
+void mark(unsigned int time) {
+   long beginning = micros();
+   while(micros() - beginning < time){
+   digitalWrite(IRpin, LOW);
+   delayMicroseconds(halfPeriodicTime);
+   digitalWrite(IRpin, HIGH);
+   delayMicroseconds(halfPeriodicTime); //38 kHz -> T = 26.31 microsec (periodic time), half of it is 13
+  }
+}
+
+
+/*****************************************************************
+      
+*/
+void space(unsigned long  time) {
+  digitalWrite(IRpin, HIGH); // REVERSE
+  if (time > 0) custom_delay_usec(time);
+}
+
+/*****************************************************************
+  
+*/
+
+void custom_delay_usec(unsigned long uSecs) {
+  if (uSecs > 4) {
+    unsigned long start = micros();
+    unsigned long endMicros = start + uSecs - 4;
+    if (endMicros < start) { // Check if overflow
+      while ( micros() > start ) {}
+    }
+    while ( micros() < endMicros ) {}
+  }
+}
+
