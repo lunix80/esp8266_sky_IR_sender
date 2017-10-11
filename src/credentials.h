@@ -1,5 +1,5 @@
-const char ssid[]     =   "wiFi_Home";
-const char pass[]     =   "02032010giulio";
+const char ssid[]     =   "yourWIFInetwork";
+const char pass[]     =   "yourWIFIpassword";
 
 
 
